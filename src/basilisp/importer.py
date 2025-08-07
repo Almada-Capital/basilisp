@@ -1,4 +1,4 @@
-import importlib.util
+import importlib
 import logging
 import marshal
 import os
@@ -151,6 +151,7 @@ class BasilispImporter(  # type: ignore[misc]  # pylint: disable=abstract-method
 
         Returns None if the module is not a Basilisp module to allow import processing to continue.
         """
+        logger.debug(f"find_spec for fullname {fullname}, path {path}, target {target}")
         package_components = fullname.split(".")
         if not path:
             path = sys.path
@@ -160,6 +161,7 @@ class BasilispImporter(  # type: ignore[misc]  # pylint: disable=abstract-method
 
         for entry in path:
             root_path = os.path.join(entry, *module_name)
+            logging.debug(f"find_spec entry {entry} module_name {module_name} root path {root_path}")
             filenames = [
                 f"{os.path.join(root_path, '__init__')}.lpy",
                 f"{root_path}.lpy",
@@ -201,6 +203,7 @@ class BasilispImporter(  # type: ignore[misc]  # pylint: disable=abstract-method
             if os.path.isdir(root_path):
                 if _is_namespace_package(root_path):
                     return ModuleSpec(fullname, None, is_package=True)
+        logger.debug("find_spec returning none")
         return None
 
     def invalidate_caches(self) -> None:

@@ -57,7 +57,47 @@ from basilisp.lang.typing import BasilispFunction, CompilerOpts, LispNumber
 from basilisp.lang.util import OBJECT_DUNDER_METHODS, demunge, is_abstract, munge
 from basilisp.util import Maybe
 
+import importlib.util
+import sys
+
+def import_module(name, package=None):
+    """An approximate implementation of import."""
+
+    logger.debug(f"importing name {name} package {package}")
+    absolute_name = importlib.util.resolve_name(name, package)
+    try:
+        return sys.modules[absolute_name]
+    except KeyError:
+        pass
+
+    # ->unparent comment
+    path = None
+    if '.' in absolute_name:
+        parent_name, _, child_name = absolute_name.rpartition('.')
+        parent_module = import_module(parent_name)
+        path = parent_module.__spec__.submodule_search_locations
+    # unparent add
+    # module = import_module(absolute_name)
+    # path = sys.path
+    for finder in sys.meta_path:
+        spec = finder.find_spec(absolute_name, path)
+        if spec is not None:
+            break
+    else:
+        msg = f'No module named {absolute_name!r}'
+        raise ModuleNotFoundError(msg, name=absolute_name)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[absolute_name] = module
+    logger.debug(f"exec_module")
+    spec.loader.exec_module(module)
+    # ->parent comment
+    if path is not None:
+        setattr(parent_module, child_name, module)
+    return module
+
 logger = logging.getLogger(__name__)
+
+m_log = {}
 
 # Public constants
 CORE_NS = "basilisp.core"
@@ -399,6 +439,7 @@ class Var(RefBase):
             ns = Namespace.get_or_create(ns)
         new_var = cls(ns, name, dynamic=dynamic, meta=meta)
         var = ns.intern(name, new_var)
+        logger.debug("var/intern")
         if val is not cls.__UNBOUND_SENTINEL:
             var.bind_root(val)
         # Namespace.intern will return an existing interned Var for the same name
@@ -407,6 +448,7 @@ class Var(RefBase):
         if var is not new_var:
             var.reset_meta(meta)
             var.set_dynamic(dynamic)
+        logger.debug("var/intern r")
         return var
 
     @classmethod
@@ -418,6 +460,7 @@ class Var(RefBase):
         meta: Optional[IPersistentMap] = None,
     ) -> "Var":
         """Create a new unbound `Var` instance to the symbol `name` in namespace `ns`."""
+        logger.debug("intern_unbound")
         return cls.intern(ns, name, cls.__UNBOUND_SENTINEL, dynamic=dynamic, meta=meta)
 
     @staticmethod
@@ -728,7 +771,7 @@ class Namespace(ReferenceBase):
 
         This method is called in code generated for the `require*` special form."""
         try:
-            ns_module = importlib.import_module(munge(ns_name))
+            ns_module = import_module(munge(ns_name))
         except ModuleNotFoundError as e:
             raise ImportError(
                 f"Basilisp namespace '{ns_name}' not found",
@@ -841,9 +884,11 @@ class Namespace(ReferenceBase):
 
     def add_refer(self, sym: sym.Symbol, var: Var) -> None:
         """Refer var in this namespace under the name sym."""
+        logger.debug(f"add_refer sym {sym} var {var}", stack_info=1)
         if not var.is_private:
             with self._lock:
                 self._refers = self._refers.assoc(sym, var)
+        logger.debug("add_refer r")
 
     def get_refer(self, sym: sym.Symbol) -> Optional[Var]:
         """Get the Var referred by Symbol or None if it does not exist."""
@@ -1904,6 +1949,12 @@ def to_lisp(o, keywordize_keys: bool = True):  # pylint: disable=unused-argument
     """Recursively convert Python collections into Lisp collections."""
     return o
 
+@to_lisp.register(str)
+def _to_lisp_str(o: str, keywordize_keys: bool = True) -> lset.PersistentSet:
+    if o.startswith(":kw:"):
+        return kw.keyword(o[4:])
+    else:
+        return o
 
 @to_lisp.register(list)
 @to_lisp.register(tuple)
@@ -1953,11 +2004,9 @@ def to_py(
     """Recursively convert Lisp collections into Python collections."""
     return o
 
-
 @to_py.register(kw.Keyword)
 def _to_py_kw(o: kw.Keyword, keyword_fn: Callable[[kw.Keyword], Any] = _kw_name) -> Any:
-    return keyword_fn(o)
-
+    return ":kw:" + o.name
 
 @to_py.register(IPersistentList)
 @to_py.register(ISeq)
@@ -1996,13 +2045,11 @@ def lrepr(o, human_readable: bool = False) -> str:
         o,
         human_readable=human_readable,
         print_dup=core_ns.find(sym.symbol(PRINT_DUP_VAR_NAME)).value,  # type: ignore
-        print_length=core_ns.find(  # type: ignore
-            sym.symbol(PRINT_LENGTH_VAR_NAME)
-        ).value,
+        print_length=None,
         print_level=core_ns.find(  # type: ignore
             sym.symbol(PRINT_LEVEL_VAR_NAME)
         ).value,
-        print_meta=core_ns.find(sym.symbol(PRINT_META_VAR_NAME)).value,  # type: ignore
+        print_meta=None,
         print_namespace_maps=core_ns.find(sym.symbol(PRINT_NAMESPACE_MAPS_VAR_NAME)).value,  # type: ignore
         print_readably=core_ns.find(  # type: ignore
             sym.symbol(PRINT_READABLY_VAR_NAME)
@@ -2325,6 +2372,7 @@ def ns_bindings(
 ) -> Iterator[Namespace]:
     """Context manager for temporarily changing the value of basilisp.core/*ns*."""
     symbol = sym.symbol(ns_name)
+    logger.debug("ns_bindings")
     ns = Namespace.get_or_create(symbol, module=module)
     ns_var = Maybe(Var.find(NS_VAR_SYM)).or_else_raise(
         lambda: RuntimeException(f"Dynamic Var {NS_VAR_SYM} not bound!")
@@ -2364,6 +2412,7 @@ def set_current_ns(
 ) -> Var:
     """Set the value of the dynamic variable `*ns*` in the current thread."""
     symbol = sym.symbol(ns_name)
+    logger.debug("set_current_ns")
     ns = Namespace.get_or_create(symbol, module=module)
     ns_var = Maybe(Var.find(NS_VAR_SYM)).or_else_raise(
         lambda: RuntimeException(f"Dynamic Var {NS_VAR_SYM} not bound!")
@@ -2383,6 +2432,7 @@ def add_generated_python(
     which_ns: Optional[Namespace] = None,
 ) -> None:
     """Add generated Python code to a dynamic variable in which_ns."""
+    logger.debug("add_generated_python")
     if which_ns is None:
         which_ns = get_current_ns()
     v = Maybe(which_ns.find(sym.symbol(GENERATED_PYTHON_VAR_NAME))).or_else(
@@ -2417,6 +2467,7 @@ def print_generated_python() -> bool:
 
 def init_ns_var() -> Var:
     """Initialize the dynamic `*ns*` variable in the `basilisp.core` Namespace."""
+    logger.debug("init_ns_var")
     core_ns = Namespace.get_or_create(CORE_NS_SYM)
     ns_var = Var.intern(
         core_ns,
@@ -2446,6 +2497,7 @@ def bootstrap_core(compiler_opts: CompilerOpts) -> None:
     )
 
     def in_ns(s: sym.Symbol):
+        logger.debug("bootstrap_in_ns")
         ns = Namespace.get_or_create(s)
         _NS.set_value(ns)
         return ns

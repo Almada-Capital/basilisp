@@ -418,10 +418,6 @@
   [reader _]
   (assert-starts reader ":")
   (let [[ns name] (read-namespaced reader)]
-    (when (str/includes? name ".")
-      (throw
-       (ex-info "Found '.' in keyword name"
-                {:error :unexpected-char})))
     (keyword ns name)))
 
 (defmethod read-next :string
@@ -523,7 +519,7 @@
   [reader opts]
   (read-sym-or-num reader opts))
 
-(defn ^:private read-edn
+(defn read-edn
   [reader opts]
   (let [raw (read-next reader opts)
         e   (if (identical? comment raw)

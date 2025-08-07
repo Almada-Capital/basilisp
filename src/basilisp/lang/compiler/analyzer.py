@@ -905,11 +905,6 @@ def _analyze_form(form: Union[ReaderForm, ISeq], ctx: AnalyzerContext):
 def _await_ast(form: ISeq, ctx: AnalyzerContext) -> Await:
     assert form.first == SpecialForm.AWAIT
 
-    if not ctx.is_async_ctx:
-        raise ctx.AnalyzerException(
-            "await forms may not appear in non-async context", form=form
-        )
-
     nelems = count(form)
     if nelems != 2:
         raise ctx.AnalyzerException(

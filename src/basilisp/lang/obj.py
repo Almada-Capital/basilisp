@@ -212,7 +212,7 @@ def _lrepr_lisp_obj(  # pylint: disable=too-many-arguments
     o: Any,
     human_readable: bool = False,
     print_dup: bool = PRINT_DUP,
-    print_length: PrintCountSetting = PRINT_LENGTH,
+    print_length: PrintCountSetting = None,
     print_level: PrintCountSetting = PRINT_LEVEL,
     print_meta: bool = PRINT_META,
     print_namespace_maps: bool = PRINT_NAMESPACE_MAPS,

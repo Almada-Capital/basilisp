@@ -1,5 +1,7 @@
 import logging
 import os
+import sys
+
 from typing import Optional
 
 TRACE = 5
@@ -11,21 +13,16 @@ DEFAULT_FORMAT = (
     "%(asctime)s %(levelname)s [%(name)s.%(funcName)s:%(lineno)d] - %(message)s"
 )
 
-
 def get_level() -> str:
     """Get the default logging level for Basilisp."""
-    return os.getenv("BASILISP_LOGGING_LEVEL", "WARNING")
+    return os.getenv("BASILISP_LOGGING_LEVEL", "ERROR")
 
 
 def get_handler(
     level: Optional[str] = None, fmt: str = DEFAULT_FORMAT
 ) -> logging.Handler:
     """Get the default logging handler for Basilisp."""
-    handler = (
-        logging.StreamHandler()
-        if os.getenv("BASILISP_USE_DEV_LOGGER", "").lower() == "true"
-        else logging.NullHandler()
-    )
+    handler = logging.StreamHandler(sys.stderr)
     handler.setFormatter(logging.Formatter(fmt))
     handler.setLevel(level or get_level())
     return handler
